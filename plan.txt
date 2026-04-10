@@ -1,0 +1,1015 @@
+================================================================
+       MOVIE TICKET APP - KẾ HOẠCH BUILD HOÀN CHỈNH
+         Android Java + Firebase | CGV-Inspired Design
+================================================================
+
+MỤC LỤC
+--------
+1. Tổng quan dự án
+2. Cấu trúc dự án (Project Structure)
+3. Cài đặt Firebase & Dependencies
+4. Cấu trúc Database (Firestore Schema)
+5. Chi tiết từng màn hình (Screens & Layouts)
+6. Chi tiết từng tính năng (Features)
+7. Firebase Cloud Messaging (Push Notification)
+8. Quy trình build step-by-step
+9. Lưu ý bảo mật & Best Practices
+
+================================================================
+1. TỔNG QUAN DỰ ÁN
+================================================================
+
+Tên app   : MovieMax (CGV-style)
+Platform  : Android (minSDK 24, targetSDK 34)
+Language  : Java
+Backend   : Firebase (Firestore, Auth, FCM, Storage)
+Design    : Dark cinema theme — đỏ/đen/vàng như CGV
+
+Luồng chính người dùng:
+  [Splash] → [Onboarding] → [Login/Register]
+           → [Home - Danh sách phim]
+           → [Movie Detail]
+           → [Chọn Rạp & Suất chiếu]
+           → [Chọn Ghế]
+           → [Thanh toán]
+           → [Ticket / E-Vé]
+           → [Thông báo nhắc giờ chiếu]
+
+================================================================
+2. CẤU TRÚC DỰ ÁN (PROJECT STRUCTURE)
+================================================================
+
+app/
+├── manifests/
+│   └── AndroidManifest.xml
+├── java/com.yourname.moviemax/
+│   ├── activities/
+│   │   ├── SplashActivity.java
+│   │   ├── OnboardingActivity.java
+│   │   ├── LoginActivity.java
+│   │   ├── RegisterActivity.java
+│   │   ├── MainActivity.java           ← BottomNav host
+│   │   ├── MovieDetailActivity.java
+│   │   ├── SelectShowtimeActivity.java
+│   │   ├── SeatSelectionActivity.java
+│   │   ├── CheckoutActivity.java
+│   │   └── TicketDetailActivity.java
+│   ├── fragments/
+│   │   ├── HomeFragment.java
+│   │   ├── SearchFragment.java
+│   │   ├── MyTicketsFragment.java
+│   │   └── ProfileFragment.java
+│   ├── adapters/
+│   │   ├── MovieAdapter.java
+│   │   ├── BannerAdapter.java          ← ViewPager2 banner
+│   │   ├── ShowtimeAdapter.java
+│   │   ├── SeatAdapter.java
+│   │   ├── TicketAdapter.java
+│   │   └── TheaterAdapter.java
+│   ├── models/
+│   │   ├── User.java
+│   │   ├── Movie.java
+│   │   ├── Theater.java
+│   │   ├── Showtime.java
+│   │   └── Ticket.java
+│   ├── services/
+│   │   ├── FirebaseAuthService.java
+│   │   ├── FirestoreService.java
+│   │   ├── FCMService.java             ← extends FirebaseMessagingService
+│   │   └── NotificationHelper.java
+│   ├── utils/
+│   │   ├── Constants.java
+│   │   ├── SharedPrefManager.java
+│   │   └── DateTimeUtils.java
+│   └── viewmodels/                     ← (tuỳ chọn, dùng MVVM)
+│       ├── HomeViewModel.java
+│       └── TicketViewModel.java
+└── res/
+    ├── layout/                         ← chi tiết bên dưới
+    ├── drawable/
+    ├── values/
+    │   ├── colors.xml
+    │   ├── strings.xml
+    │   ├── themes.xml
+    │   └── dimens.xml
+    ├── font/
+    │   ├── montserrat_bold.ttf
+    │   └── montserrat_regular.ttf
+    └── raw/
+        └── (âm thanh nếu cần)
+
+================================================================
+3. CÀI ĐẶT FIREBASE & DEPENDENCIES
+================================================================
+
+--- build.gradle (Project level) ---
+buildscript {
+    dependencies {
+        classpath 'com.google.gms:google-services:4.4.1'
+    }
+}
+
+--- build.gradle (App level) ---
+plugins {
+    id 'com.google.gms.google-services'
+}
+
+dependencies {
+    // Firebase BOM (quản lý version tự động)
+    implementation platform('com.google.firebase:firebase-bom:33.1.0')
+    implementation 'com.google.firebase:firebase-auth'
+    implementation 'com.google.firebase:firebase-firestore'
+    implementation 'com.google.firebase:firebase-messaging'
+    implementation 'com.google.firebase:firebase-storage'
+    implementation 'com.google.firebase:firebase-analytics'
+
+    // Google Sign-In
+    implementation 'com.google.android.gms:play-services-auth:21.2.0'
+
+    // UI Libraries
+    implementation 'com.github.bumptech.glide:glide:4.16.0'       ← load ảnh
+    implementation 'com.airbnb.android:lottie:6.4.0'              ← animation
+    implementation 'com.google.android.material:material:1.12.0'
+    implementation 'androidx.viewpager2:viewpager2:1.1.0'
+    implementation 'me.relex:circleindicator:2.1.6'               ← dot indicator
+    implementation 'com.tbuonomo:dotsindicator:5.0'
+    implementation 'de.hdodenhof:circleimageview:3.1.0'           ← avatar
+    implementation 'com.github.PhilJay:MPAndroidChart:v3.1.0'     ← (optional)
+
+    // WorkManager cho notification scheduling
+    implementation 'androidx.work:work-runtime:2.9.0'
+
+    // QR Code cho e-ticket
+    implementation 'com.journeyapps:zxing-android-embedded:4.3.0'
+}
+
+--- google-services.json ---
+→ Tải từ Firebase Console → Project Settings → Google Services
+→ Đặt vào app/ (cùng cấp với build.gradle của app)
+
+--- AndroidManifest.xml permissions ---
+<uses-permission android:name="android.permission.INTERNET"/>
+<uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>
+<uses-permission android:name="android.permission.VIBRATE"/>
+
+--- Khai báo FCMService trong Manifest ---
+<service
+    android:name=".services.FCMService"
+    android:exported="false">
+    <intent-filter>
+        <action android:name="com.google.firebase.MESSAGING_EVENT"/>
+    </intent-filter>
+</service>
+
+================================================================
+4. CẤU TRÚC DATABASE (FIRESTORE SCHEMA)
+================================================================
+
+Collection: users
+─────────────────
+users/{uid}
+  ├── uid         : String
+  ├── name        : String
+  ├── email       : String
+  ├── phone       : String
+  ├── avatarUrl   : String
+  ├── fcmToken    : String       ← cập nhật mỗi lần login
+  └── createdAt   : Timestamp
+
+Collection: movies
+──────────────────
+movies/{movieId}
+  ├── movieId     : String
+  ├── title       : String
+  ├── description : String
+  ├── genre       : List<String>   e.g. ["Action","Sci-Fi"]
+  ├── duration    : int            (phút)
+  ├── rating      : float          (e.g. 8.5)
+  ├── ageLimit    : String         ("P", "T13", "T16", "T18")
+  ├── posterUrl   : String
+  ├── trailerUrl  : String
+  ├── language    : String
+  ├── releaseDate : Timestamp
+  ├── isNowShowing: boolean
+  └── isComingSoon: boolean
+
+Collection: theaters
+────────────────────
+theaters/{theaterId}
+  ├── theaterId   : String
+  ├── name        : String         e.g. "CGV Vincom Ba Trieu"
+  ├── address     : String
+  ├── city        : String
+  ├── latitude    : double
+  ├── longitude   : double
+  └── imageUrl    : String
+
+Collection: showtimes
+─────────────────────
+showtimes/{showtimeId}
+  ├── showtimeId  : String
+  ├── movieId     : String
+  ├── theaterId   : String
+  ├── roomName    : String         e.g. "Screen 3 - IMAX"
+  ├── startTime   : Timestamp
+  ├── endTime     : Timestamp
+  ├── price       : double
+  ├── totalSeats  : int
+  ├── availableSeats: int
+  └── seatMap     : Map<String, String>
+       key = seatId (e.g. "A1", "B5")
+       value = status ("available" | "booked" | "selected")
+
+Collection: tickets
+───────────────────
+tickets/{ticketId}
+  ├── ticketId    : String
+  ├── userId      : String
+  ├── movieId     : String
+  ├── showtimeId  : String
+  ├── theaterId   : String
+  ├── seats       : List<String>   e.g. ["C3","C4"]
+  ├── totalPrice  : double
+  ├── bookingTime : Timestamp
+  ├── status      : String         ("confirmed" | "cancelled" | "used")
+  ├── qrCode      : String         (encoded ticket info)
+  └── notifSent   : boolean
+
+Firestore Rules (firestore.rules):
+───────────────────────────────────
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    match /users/{uid} {
+      allow read, write: if request.auth != null && request.auth.uid == uid;
+    }
+    match /movies/{movieId} {
+      allow read: if true;
+      allow write: if false; // chỉ admin
+    }
+    match /theaters/{theaterId} {
+      allow read: if true;
+    }
+    match /showtimes/{showtimeId} {
+      allow read: if true;
+      allow write: if request.auth != null; // update seatMap khi đặt vé
+    }
+    match /tickets/{ticketId} {
+      allow read: if request.auth != null &&
+                  resource.data.userId == request.auth.uid;
+      allow create: if request.auth != null;
+    }
+  }
+}
+
+================================================================
+5. CHI TIẾT TỪNG MÀN HÌNH (SCREENS & LAYOUTS)
+================================================================
+
+--- BẢNG MÀU (CGV-Inspired Dark Cinema Theme) ---
+  Background chính   : #0A0A0F  (gần đen, có chút xanh đen)
+  Surface / Card     : #141420
+  Primary Red        : #E50914  (đỏ CGV)
+  Accent Gold        : #F5C518  (vàng IMDb-like cho rating)
+  Text Primary       : #FFFFFF
+  Text Secondary     : #A0A0B0
+  Divider            : #2A2A3A
+  Success            : #22C55E
+  Font chính         : Montserrat (Bold cho tiêu đề, Regular cho body)
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+SCREEN 1: SPLASH (activity_splash.xml)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Layout: ConstraintLayout, background #0A0A0F
+
+Thành phần:
+  - LottieAnimationView (film reel / cinema animation, raw/cinema_lottie.json)
+    → size 200dp x 200dp, căn giữa màn hình
+  - TextView "MOVIEMAX"
+    → font Montserrat Bold, size 32sp, màu #E50914
+    → letterSpacing 0.3, marginTop 24dp
+  - TextView "Your cinema. Anytime."
+    → font Montserrat Regular, size 14sp, màu #A0A0B0
+  - ProgressBar (style horizontal) ở dưới cùng
+    → màu #E50914
+
+Logic SplashActivity.java:
+  - Check auth (FirebaseAuth.getCurrentUser())
+  - Nếu đã login → MainActivity
+  - Nếu chưa → LoginActivity
+  - Delay 2.5s với Handler
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+SCREEN 2: ONBOARDING (activity_onboarding.xml)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Layout: ConstraintLayout
+
+Thành phần:
+  - ViewPager2 (chiếm 75% màn hình)
+    → 3 trang: mỗi trang có LottieAnimation + Title + Subtitle
+    Trang 1: "Phim mới mỗi tuần" – animation popcorn
+    Trang 2: "Đặt vé dễ dàng"    – animation mobile ticket
+    Trang 3: "Nhận thông báo"    – animation bell notification
+  - DotsIndicator (com.tbuonomo) bên dưới ViewPager2
+    → màu selected #E50914, unselected #2A2A3A
+  - Button "Tiếp theo" / "Bắt đầu ngay"
+    → background rounded red (#E50914), text white, height 52dp
+    → corner radius 26dp (pill shape)
+  - TextView "Bỏ qua" (skip)
+    → góc trên phải, text #A0A0B0
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+SCREEN 3: LOGIN (activity_login.xml)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Layout: ScrollView > ConstraintLayout
+
+Phần trên (40% màn hình):
+  - ImageView (poster collage background, scaleType centerCrop)
+    → overlay gradient từ transparent → #0A0A0F (phía dưới)
+  - Logo "MOVIEMAX" phía trên trái
+
+Phần dưới (form):
+  - TextView "Chào mừng trở lại" – Montserrat Bold 26sp trắng
+  - TextView "Đăng nhập để tiếp tục" – 14sp #A0A0B0
+
+  - TextInputLayout (Material Outlined style, tint đỏ khi focus)
+    ├── icon người dùng ở đầu
+    └── EditText Email / Username
+
+  - TextInputLayout
+    ├── icon khóa ở đầu
+    ├── EditText Password
+    └── Toggle show/hide password ở cuối
+
+  - TextView "Quên mật khẩu?" – align right, màu #E50914
+
+  - Button "ĐĂNG NHẬP"
+    → background: gradient đỏ (#E50914 → #C0050F)
+    → chữ trắng bold, height 52dp, cornerRadius 12dp
+    → ripple effect khi bấm
+
+  - Row divider: "── hoặc ──"
+
+  - Button "Đăng nhập bằng Google"
+    → background trắng/tối, icon Google, border 1dp #2A2A3A
+  - Button "Đăng nhập bằng Facebook"
+    → background #1877F2, icon Facebook
+
+  - TextView "Chưa có tài khoản? Đăng ký ngay"
+    → "Đăng ký ngay" màu #E50914, bold
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+SCREEN 4: REGISTER (activity_register.xml)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Layout: ScrollView > ConstraintLayout
+
+Thành phần:
+  - Back arrow (ImageButton) góc trên trái
+  - TextView "Tạo tài khoản" – Montserrat Bold 28sp
+  - TextView "Điền thông tin để bắt đầu" – 14sp secondary
+
+  - CircleImageView (chọn avatar, click để upload)
+    → 100dp x 100dp, border đỏ 2dp
+    → icon camera overlay phía dưới phải
+
+  - TextInputLayout: Họ và tên
+  - TextInputLayout: Email
+  - TextInputLayout: Số điện thoại
+  - TextInputLayout: Mật khẩu
+  - TextInputLayout: Xác nhận mật khẩu
+
+  - CheckBox "Tôi đồng ý với Điều khoản & Chính sách"
+    → text có hyperlink màu đỏ
+
+  - Button "ĐĂNG KÝ" – same style Login button
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+SCREEN 5: HOME (fragment_home.xml)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Layout: NestedScrollView + CoordinatorLayout
+
+[ TOOLBAR / HEADER ]
+  - CollapsingToolbarLayout:
+    → Khi scroll lên: toolbar thu nhỏ, nền trong suốt → đen
+    → Logo trái | SearchIcon + NotificationIcon phải
+    → Avatar user góc phải (CircleImageView 36dp)
+
+[ BANNER / HERO SECTION ]
+  - ViewPager2 (height 220dp, full width)
+    → Auto-scroll mỗi 4 giây
+    → Mỗi item: ảnh poster phim + gradient phía dưới + tên phim + nút "Đặt vé"
+    → Rounded corners 16dp
+    → Margin ngang 16dp, overlap sang 2 bên một chút (peek 32dp)
+  - DotsIndicator bên dưới, căn giữa
+
+[ CHIP FILTER ]
+  - HorizontalScrollView với ChipGroup:
+    → "Đang chiếu" | "Sắp chiếu" | "Hành động" | "Lãng mạn" | "Kinh dị" | "Hoạt hình"
+    → Chip selected: background #E50914, text trắng
+    → Chip unselected: background #141420, border #2A2A3A
+
+[ PHIM ĐANG CHIẾU ]
+  - TextView "Đang chiếu 🔥" – Montserrat Bold 18sp
+  - RecyclerView (horizontal scroll)
+    → item_movie_card.xml:
+        - ImageView poster (width 140dp, height 200dp, cornerRadius 12dp)
+        - Glide load ảnh với placeholder skeleton
+        - Badge "T16" hoặc "IMAX" ở góc trên
+        - Rating bar dưới poster (icon ngôi sao vàng)
+        - TextView tên phim (2 dòng max, ellipsize)
+        - TextView thể loại (1 dòng, text secondary)
+        - Ripple click toàn card
+
+[ PHIM SẮP CHIẾU ]
+  - TextView "Sắp chiếu 📅" – Montserrat Bold 18sp
+  - RecyclerView (horizontal scroll)
+    → item tương tự nhưng có badge "Mở bán MM/DD"
+    → Button "Nhắc tôi" thay vì "Đặt vé"
+
+[ RẠP GẦN BẠN ]
+  - TextView "Rạp gần bạn 📍"
+  - RecyclerView (horizontal)
+    → item_theater_card.xml:
+        - ImageView rạp (cornerRadius 12dp)
+        - Tên rạp (bold)
+        - Địa chỉ rút gọn
+        - "3.2 km" với icon pin
+
+[ BOTTOM NAVIGATION BAR ]
+  - Material BottomNavigationView
+    → background #141420, indicator color #E50914/30
+    → 4 tab: Home | Tìm kiếm | Vé của tôi | Hồ sơ
+    → Icon + Label, tint selected = #E50914
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+SCREEN 6: MOVIE DETAIL (activity_movie_detail.xml)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Layout: CoordinatorLayout + AppBarLayout + NestedScrollView
+
+[ HERO SECTION ]
+  - CollapsingToolbarLayout (height 320dp):
+    → ImageView backdrop poster (full width, scaleType centerCrop)
+    → Gradient overlay: transparent → #0A0A0F từ giữa xuống
+    → Nút back (trắng, background circle mờ)
+    → Nút share góc phải
+  - Trên gradient:
+    → ImageView poster nhỏ (width 100dp, float lên, cornerRadius 8dp)
+    → Bên phải poster:
+        TextView tên phim (bold 22sp, trắng)
+        Row rating: ★ 8.5/10 (vàng) | 2h15m | T16
+        TextView thể loại: Hành động • Viễn tưởng
+
+[ CONTENT SECTION ] (scroll)
+  - Row nút hành động:
+    → Button "ĐẶT VÉ NGAY" (đỏ, full width, 52dp, bold)
+    → IconButton Bookmark (lưu phim yêu thích)
+
+  - Card mô tả:
+    → TextView "Nội dung phim" (bold section header)
+    → TextView mô tả (expandable, 3 dòng mặc định → "Xem thêm")
+
+  - Row cast (diễn viên):
+    → Header "Diễn viên"
+    → HorizontalRecyclerView: avatar + tên + vai diễn
+
+  - Section "Suất chiếu hôm nay":
+    → Chip chọn ngày (7 ngày kế tiếp, horizontal scroll)
+      - Mỗi chip: Thứ - Ngày (e.g. "T3\n12")
+      - Selected: red background
+    → RecyclerView suất chiếu (dọc):
+      item_showtime.xml:
+        - Tên rạp (bold)
+        - Row giờ chiếu (chip: "10:30" | "13:15" | "16:00")
+          → click chip → đến SeatSelectionActivity
+        - Badge "IMAX" | "2D" | "3D"
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+SCREEN 7: CHỌN GHẾ (activity_seat_selection.xml)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Layout: ConstraintLayout
+
+[ HEADER ]
+  - Back button
+  - TextView tên phim + suất chiếu
+
+[ MÀN HÌNH RẠP ]
+  - View curved "SCREEN" (màu xám nhạt, perspective 3D effect)
+  - TextView "Màn hình" phía trên
+
+[ SƠ ĐỒ GHẾ ]
+  - GridView hoặc RecyclerView (GridLayoutManager)
+    → Mỗi ghế: 1 ô vuông 36dp x 36dp, margin 4dp
+    → Ghế trống:    background drawable tròn #2A2A3A, icon ghế trắng
+    → Ghế đã đặt:  background #555555, icon đỏ chéo (không click)
+    → Ghế đang chọn: background #E50914, icon vàng (selected state)
+    → Hàng VIP (cuối): icon ghế lớn hơn, màu vàng #F5C518
+  - Thanh cuộn nếu rạp nhiều ghế
+
+[ LEGEND / CHÚ THÍCH ]
+  - Row 3 ô: 🟫 Trống | 🟥 Đang chọn | ⬛ Đã đặt
+
+[ BOTTOM PANEL ]
+  - Card nền đen nổi lên:
+    → "Bạn đang chọn: C3, C4" (ghế đã chọn)
+    → "Tổng: 220,000 đ" (tính real-time)
+    → Button "TIẾP TỤC" (đỏ, full width)
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+SCREEN 8: THANH TOÁN (activity_checkout.xml)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Layout: ScrollView > ConstraintLayout
+
+[ ORDER SUMMARY CARD ]
+  - Background #141420, cornerRadius 16dp
+  - ImageView poster (60dp) + thông tin đặt vé
+  - Tên phim | Rạp | Ngày | Giờ | Ghế | Số ghế
+
+[ CHI TIẾT GIÁ ]
+  - Card phân tích giá:
+    → Giá vé (x2)     : 200,000 đ
+    → Phí dịch vụ     :  20,000 đ
+    → Khuyến mãi      : -10,000 đ
+    → Divider
+    → Tổng cộng       : 210,000 đ (bold, màu đỏ)
+
+[ PHƯƠNG THỨC THANH TOÁN ]
+  - RadioGroup dạng card:
+    → 💳 Thẻ tín dụng/ghi nợ
+    → 📱 Ví MoMo
+    → 💵 Tiền mặt tại quầy
+    → 🎁 Nhập mã giảm giá (TextInputLayout expandable)
+
+[ ĐIỀU KHOẢN ]
+  - CheckBox đồng ý điều khoản
+  - Button "XÁC NHẬN ĐẶT VÉ"
+    → khi loading: show ProgressBar, disable button
+
+[ SAU KHI THÀNH CÔNG ]
+  - LottieAnimation thành công (checkmark)
+  - → Tự động chuyển sang TicketDetailActivity
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+SCREEN 9: E-VÉ (activity_ticket_detail.xml)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Layout: ConstraintLayout, nền đen
+
+[ TICKET CARD ] – giống vé xé
+  - Background trắng (hoặc nền màu nhạt), cornerRadius 20dp
+  - Phần trên:
+    → Gradient đỏ → đen (background header)
+    → Logo MOVIEMAX trái | Trạng thái "ĐÃ XÁC NHẬN" (badge xanh lá)
+    → Tên phim (bold, trắng, 20sp)
+    → Thông tin: Rạp | Ngày | Giờ | Phòng | Ghế
+  - Dashed divider ngang (zigzag effect như vé thật)
+  - Phần dưới:
+    → QR Code (400x400, generate từ ticketId)
+    → Mã vé bên dưới QR
+    → "Vui lòng xuất trình QR khi vào rạp"
+
+[ ACTIONS ]
+  - Button "CHIA SẺ" (share intent, screenshot ticket)
+  - Button "TẢI XUỐNG" (save to gallery)
+  - TextButton "Về trang chủ"
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+SCREEN 10: VÉ CỦA TÔI (fragment_my_tickets.xml)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Layout: ConstraintLayout
+
+  - TabLayout (2 tab): "Sắp chiếu" | "Đã xem"
+    → Indicator đỏ, text bold khi chọn
+  - ViewPager2 chứa 2 RecyclerView
+
+  item_ticket_list.xml:
+    - Card nền #141420, cornerRadius 16dp, margin 12dp
+    - Poster nhỏ bên trái (80dp x 100dp, cornerRadius 8dp)
+    - Thông tin: Tên phim | Ngày giờ | Rạp | Ghế
+    - Badge trạng thái: "SẮP CHIẾU" (xanh) / "ĐÃ XEM" (xám)
+    - Button nhỏ "Xem vé" → mở TicketDetailActivity
+
+  - Empty state khi chưa có vé:
+    → LottieAnimation (empty box)
+    → "Bạn chưa có vé nào"
+    → Button "Khám phá phim ngay"
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+SCREEN 11: HỒ SƠ (fragment_profile.xml)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Layout: NestedScrollView
+
+  [ Header ]
+    - Background gradient đỏ → đen (height 180dp)
+    - CircleImageView avatar (100dp, border trắng 3dp)
+    - TextView tên người dùng (bold, trắng)
+    - TextView email (secondary)
+    - Button "Chỉnh sửa" (outline trắng, nhỏ)
+
+  [ Stats Row ]
+    - 3 ô: "Tổng vé" | "Phim đã xem" | "Điểm thưởng"
+    - Background card #141420, cornerRadius 12dp
+
+  [ Menu List ]
+    - Mỗi item: icon | text | arrow →
+    - Mục: Tài khoản | Thông báo | Lịch sử thanh toán
+            Yêu thích | Đánh giá phim | Trợ giúp | Đăng xuất
+    - Đăng xuất: text màu đỏ #E50914
+
+================================================================
+6. CHI TIẾT TÍNH NĂNG (FEATURES CODE GUIDE)
+================================================================
+
+──────────────────────────────────────────
+A. FIREBASE AUTHENTICATION
+──────────────────────────────────────────
+
+// Login bằng Email/Password
+FirebaseAuth mAuth = FirebaseAuth.getInstance();
+mAuth.signInWithEmailAndPassword(email, password)
+    .addOnCompleteListener(task -> {
+        if (task.isSuccessful()) {
+            FirebaseUser user = mAuth.getCurrentUser();
+            updateFCMToken(user.getUid()); // lưu token mới
+            startActivity(new Intent(this, MainActivity.class));
+        } else {
+            showError(task.getException().getMessage());
+        }
+    });
+
+// Register
+mAuth.createUserWithEmailAndPassword(email, password)
+    .addOnCompleteListener(task -> {
+        if (task.isSuccessful()) {
+            FirebaseUser user = mAuth.getCurrentUser();
+            saveUserToFirestore(user.getUid(), name, email, phone);
+        }
+    });
+
+// Google Sign-In
+GoogleSignInOptions gso = new GoogleSignInOptions.Builder(
+    GoogleSignInOptions.DEFAULT_SIGN_IN)
+    .requestIdToken(getString(R.string.default_web_client_id))
+    .requestEmail()
+    .build();
+GoogleSignInClient googleClient = GoogleSignIn.getClient(this, gso);
+// → startActivityForResult(googleClient.getSignInIntent(), RC_SIGN_IN)
+// → onActivityResult → firebaseAuthWithGoogle(account)
+
+// Đăng xuất
+mAuth.signOut();
+GoogleSignIn.getClient(this, gso).signOut();
+startActivity(new Intent(this, LoginActivity.class));
+
+──────────────────────────────────────────
+B. FIRESTORE – LẤY DANH SÁCH PHIM
+──────────────────────────────────────────
+
+FirebaseFirestore db = FirebaseFirestore.getInstance();
+
+// Lấy phim đang chiếu (realtime listener)
+db.collection("movies")
+    .whereEqualTo("isNowShowing", true)
+    .orderBy("releaseDate", Query.Direction.DESCENDING)
+    .addSnapshotListener((value, error) -> {
+        if (error != null) return;
+        List<Movie> movies = new ArrayList<>();
+        for (DocumentSnapshot doc : value.getDocuments()) {
+            Movie movie = doc.toObject(Movie.class);
+            movies.add(movie);
+        }
+        movieAdapter.setData(movies);
+    });
+
+// Lấy suất chiếu theo phim và ngày
+db.collection("showtimes")
+    .whereEqualTo("movieId", movieId)
+    .whereGreaterThanOrEqualTo("startTime", startOfDay)
+    .whereLessThan("startTime", endOfDay)
+    .get()
+    .addOnSuccessListener(snapshot -> { ... });
+
+──────────────────────────────────────────
+C. ĐẶT VÉ – TRANSACTION ĐỂ TRÁNH RACE CONDITION
+──────────────────────────────────────────
+
+// Dùng Firestore Transaction để đảm bảo atomic
+db.runTransaction(transaction -> {
+    DocumentReference showtimeRef = db.collection("showtimes").document(showtimeId);
+    DocumentSnapshot snapshot = transaction.get(showtimeRef);
+    
+    // Kiểm tra ghế còn trống
+    Map<String, Object> seatMap = (Map<String, Object>) snapshot.get("seatMap");
+    for (String seat : selectedSeats) {
+        if (!"available".equals(seatMap.get(seat))) {
+            throw new FirebaseFirestoreException("Ghế đã được đặt",
+                FirebaseFirestoreException.Code.ABORTED);
+        }
+    }
+    
+    // Cập nhật trạng thái ghế
+    for (String seat : selectedSeats) {
+        seatMap.put(seat, "booked");
+    }
+    transaction.update(showtimeRef, "seatMap", seatMap);
+    transaction.update(showtimeRef, "availableSeats",
+        snapshot.getLong("availableSeats") - selectedSeats.size());
+    
+    // Tạo ticket
+    String ticketId = db.collection("tickets").document().getId();
+    Map<String, Object> ticket = new HashMap<>();
+    ticket.put("ticketId", ticketId);
+    ticket.put("userId", currentUserId);
+    ticket.put("movieId", movieId);
+    ticket.put("showtimeId", showtimeId);
+    ticket.put("seats", selectedSeats);
+    ticket.put("totalPrice", totalPrice);
+    ticket.put("bookingTime", FieldValue.serverTimestamp());
+    ticket.put("status", "confirmed");
+    ticket.put("notifSent", false);
+    transaction.set(db.collection("tickets").document(ticketId), ticket);
+    
+    return ticketId;
+}).addOnSuccessListener(ticketId -> {
+    // Chuyển sang màn hình vé
+    scheduleNotification(ticketId, showtimeTime);
+    Intent intent = new Intent(this, TicketDetailActivity.class);
+    intent.putExtra("ticketId", ticketId);
+    startActivity(intent);
+}).addOnFailureListener(e -> {
+    Toast.makeText(this, "Đặt vé thất bại: " + e.getMessage(),
+        Toast.LENGTH_SHORT).show();
+});
+
+──────────────────────────────────────────
+D. UPLOAD AVATAR LÊN FIREBASE STORAGE
+──────────────────────────────────────────
+
+FirebaseStorage storage = FirebaseStorage.getInstance();
+StorageReference ref = storage.getReference()
+    .child("avatars/" + userId + ".jpg");
+
+// Upload từ Uri (sau khi user chọn ảnh)
+ref.putFile(imageUri)
+    .addOnProgressListener(snapshot -> {
+        int progress = (int)(100.0 * snapshot.getBytesTransferred()
+                        / snapshot.getTotalByteCount());
+        progressBar.setProgress(progress);
+    })
+    .addOnSuccessListener(taskSnapshot -> {
+        ref.getDownloadUrl().addOnSuccessListener(uri -> {
+            // Lưu URL vào Firestore user document
+            db.collection("users").document(userId)
+                .update("avatarUrl", uri.toString());
+        });
+    });
+
+================================================================
+7. PUSH NOTIFICATION (FCM)
+================================================================
+
+──────────────────────────────────────────
+A. FCMService.java
+──────────────────────────────────────────
+
+public class FCMService extends FirebaseMessagingService {
+    
+    @Override
+    public void onNewToken(@NonNull String token) {
+        super.onNewToken(token);
+        // Cập nhật token vào Firestore khi token thay đổi
+        String userId = FirebaseAuth.getInstance().getCurrentUser() != null
+            ? FirebaseAuth.getInstance().getCurrentUser().getUid() : null;
+        if (userId != null) {
+            FirebaseFirestore.getInstance()
+                .collection("users").document(userId)
+                .update("fcmToken", token);
+        }
+    }
+
+    @Override
+    public void onMessageReceived(@NonNull RemoteMessage message) {
+        super.onMessageReceived(message);
+        String title = message.getNotification().getTitle();
+        String body  = message.getNotification().getBody();
+        String ticketId = message.getData().get("ticketId");
+        NotificationHelper.showNotification(this, title, body, ticketId);
+    }
+}
+
+──────────────────────────────────────────
+B. NotificationHelper.java
+──────────────────────────────────────────
+
+public class NotificationHelper {
+    public static void showNotification(Context ctx, String title,
+                                        String body, String ticketId) {
+        // Tạo PendingIntent mở TicketDetailActivity
+        Intent intent = new Intent(ctx, TicketDetailActivity.class);
+        intent.putExtra("ticketId", ticketId);
+        PendingIntent pi = PendingIntent.getActivity(ctx, 0, intent,
+            PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
+
+        NotificationCompat.Builder builder = new NotificationCompat.Builder(
+            ctx, "movie_channel")
+            .setSmallIcon(R.drawable.ic_notification)
+            .setContentTitle(title)
+            .setContentText(body)
+            .setPriority(NotificationCompat.PRIORITY_HIGH)
+            .setAutoCancel(true)
+            .setContentIntent(pi)
+            .setColor(ContextCompat.getColor(ctx, R.color.primary_red));
+
+        NotificationManagerCompat.from(ctx)
+            .notify(ticketId.hashCode(), builder.build());
+    }
+    
+    public static void createChannel(Context ctx) {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            NotificationChannel channel = new NotificationChannel(
+                "movie_channel", "Movie Notifications",
+                NotificationManager.IMPORTANCE_HIGH);
+            channel.setDescription("Nhắc nhở lịch chiếu phim");
+            ctx.getSystemService(NotificationManager.class)
+                .createNotificationChannel(channel);
+        }
+    }
+}
+
+──────────────────────────────────────────
+C. LẬP LỊCH THÔNG BÁO LOCAL (WorkManager)
+──────────────────────────────────────────
+
+// Gửi thông báo nhắc 30 phút trước suất chiếu
+public static void scheduleNotification(String ticketId, long showtimeMillis) {
+    long delay = showtimeMillis - System.currentTimeMillis() - 30 * 60 * 1000;
+    if (delay <= 0) return;
+
+    Data data = new Data.Builder()
+        .putString("ticketId", ticketId)
+        .build();
+
+    OneTimeWorkRequest work = new OneTimeWorkRequest.Builder(
+        NotificationWorker.class)
+        .setInitialDelay(delay, TimeUnit.MILLISECONDS)
+        .setInputData(data)
+        .addTag(ticketId)
+        .build();
+
+    WorkManager.getInstance(context).enqueue(work);
+}
+
+// NotificationWorker.java (extends Worker)
+// → doWork() → gọi NotificationHelper.showNotification()
+
+──────────────────────────────────────────
+D. GỬI THÔNG BÁO TỪ SERVER (Firebase Admin / Cloud Functions)
+──────────────────────────────────────────
+
+Kịch bản: Admin gửi thông báo khuyến mãi cho tất cả user
+→ Dùng Firebase Cloud Functions (Node.js):
+
+// functions/index.js
+exports.sendPromoNotification = functions.https.onCall(
+  async (data, context) => {
+    const { title, body } = data;
+    
+    // Lấy tất cả FCM token từ Firestore
+    const users = await admin.firestore().collection("users").get();
+    const tokens = users.docs
+        .map(doc => doc.data().fcmToken)
+        .filter(Boolean);
+    
+    await admin.messaging().sendMulticast({
+        tokens,
+        notification: { title, body },
+        android: { priority: "high" }
+    });
+  }
+);
+
+Kịch bản tự động: Nhắc giờ chiếu dựa vào Firestore trigger
+// Khi ticket được tạo → Cloud Function lên lịch message
+exports.onTicketCreated = functions.firestore
+    .document("tickets/{ticketId}")
+    .onCreate(async (snap, context) => {
+        const ticket = snap.data();
+        const showtime = await admin.firestore()
+            .collection("showtimes").doc(ticket.showtimeId).get();
+        const startTime = showtime.data().startTime.toDate();
+        
+        // Lên lịch gửi thông báo 30 phút trước (dùng Cloud Tasks / Scheduler)
+        // hoặc dùng FCM scheduled messages
+    });
+
+================================================================
+8. QUY TRÌNH BUILD STEP-BY-STEP
+================================================================
+
+BƯỚC 1: Khởi tạo Firebase
+──────────────────────────
+1. Vào https://console.firebase.google.com
+2. Tạo project mới: "MovieMax"
+3. Thêm app Android: nhập package name (com.yourname.moviemax)
+4. Tải google-services.json → đặt vào app/
+5. Bật các dịch vụ: Authentication, Firestore, Storage, FCM, Analytics
+
+BƯỚC 2: Setup dự án Android Studio
+────────────────────────────────────
+1. New Project → Empty Activity → Java
+2. Thêm dependencies vào build.gradle
+3. Đặt google-services.json
+4. Tạo cấu trúc package như mô tả trên
+5. Thêm font Montserrat vào res/font/
+6. Cài đặt colors.xml, themes.xml, dimens.xml
+
+BƯỚC 3: Build Authentication
+──────────────────────────────
+1. SplashActivity: check auth → navigate
+2. LoginActivity: Email/Password + Google
+3. RegisterActivity: tạo user + upload avatar
+4. Lưu FCM token sau login
+
+BƯỚC 4: Seed dữ liệu Firestore
+────────────────────────────────
+1. Viết script (Java hoặc admin SDK) để thêm dữ liệu mẫu:
+   - 10 bộ phim (đang chiếu + sắp chiếu)
+   - 5 rạp
+   - 20 suất chiếu (nhiều ngày, nhiều rạp)
+2. Hoặc thêm tay qua Firestore Console
+
+BƯỚC 5: Build màn hình Home & Movie Detail
+────────────────────────────────────────────
+1. HomeFragment: ViewPager2 banner + 2 RecyclerView
+2. MovieDetailActivity: CollapsingToolbar + suất chiếu
+3. Implement Glide cho ảnh
+
+BƯỚC 6: Build Seat Selection & Checkout
+─────────────────────────────────────────
+1. SeatSelectionActivity: GridView ghế + real-time update
+2. CheckoutActivity: tóm tắt + thanh toán
+3. Implement Firestore Transaction khi đặt vé
+
+BƯỚC 7: Build Ticket & Notification
+──────────────────────────────────────
+1. TicketDetailActivity: QR Code (ZXing) + thông tin vé
+2. FCMService: nhận notification
+3. WorkManager: lên lịch thông báo local
+4. (Optional) Cloud Functions để gửi server-side notification
+
+BƯỚC 8: Polish & Test
+──────────────────────
+1. Loading states (Shimmer / Skeleton)
+2. Empty states (Lottie animation)
+3. Error handling (network, Firestore)
+4. Input validation tất cả form
+5. Test trên nhiều kích thước màn hình
+6. Kiểm tra Firestore Rules
+
+BƯỚC 9: Deploy
+──────────────
+1. Tạo signed APK (Release)
+2. Bật R8 minification
+3. Test release build
+4. Upload lên Google Play (hoặc phân phối APK)
+
+================================================================
+9. LƯU Ý BẢO MẬT & BEST PRACTICES
+================================================================
+
+BẢO MẬT:
+  ✅ Không hardcode API keys trong code (dùng google-services.json)
+  ✅ Firestore Rules phải chặt chẽ (không để read/write: if true)
+  ✅ Validate input phía client VÀ server (Cloud Functions)
+  ✅ Dùng Firebase App Check để ngăn abuse API
+  ✅ Không lưu password người dùng — Firebase Auth xử lý
+
+PERFORMANCE:
+  ✅ Glide cache ảnh tự động (đừng tải lại mỗi lần scroll)
+  ✅ Firestore Pagination (limit() + startAfter()) cho list dài
+  ✅ Dùng SnapshotListener cho dữ liệu real-time, get() cho static
+  ✅ Tắt SnapshotListener trong onStop() để tránh memory leak
+  ✅ RecyclerView DiffUtil cho smooth update
+
+UX:
+  ✅ Skeleton loading (Shimmer library) khi đang tải dữ liệu
+  ✅ Offline support: Firestore tự cache, thêm persistenceEnabled
+  ✅ Confirm dialog trước khi đăng xuất / huỷ vé
+  ✅ Toast / Snackbar rõ ràng cho mọi action
+  ✅ Haptic feedback khi chọn ghế
+
+FIRESTORE OFFLINE:
+  // Bật offline persistence
+  FirebaseFirestoreSettings settings = new FirebaseFirestoreSettings.Builder()
+      .setPersistenceEnabled(true)
+      .setCacheSizeBytes(FirebaseFirestoreSettings.CACHE_SIZE_UNLIMITED)
+      .build();
+  db.setFirestoreSettings(settings);
+
+DEBUG:
+  ✅ Dùng Firebase Local Emulator khi dev (không tốn quota)
+  ✅ Firebase Crashlytics để track crash production
+  ✅ Firebase Performance Monitoring
+
+================================================================
+       ĐÃ ĐỦ THÔNG TIN ĐỂ BUILD APP HOÀN CHỈNH!
+      Chúc bạn build thành công app MovieMax 🎬🍿
+================================================================

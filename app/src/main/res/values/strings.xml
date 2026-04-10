@@ -1,0 +1,18 @@
+<resources>
+    <string name="app_name">MovieMax</string>
+    <string name="tagline">Your cinema. Anytime.</string>
+    <string name="login">Dang nhap</string>
+    <string name="register">Dang ky</string>
+    <string name="email">Email</string>
+    <string name="password">Mat khau</string>
+    <string name="full_name">Ho va ten</string>
+    <string name="home">Home</string>
+    <string name="search">Tim kiem</string>
+    <string name="my_tickets">Ve cua toi</string>
+    <string name="profile">Ho so</string>
+    <string name="book_now">Dat ve ngay</string>
+    <string name="choose_showtime">Chon suat chieu</string>
+    <string name="continue_text">Tiep tuc</string>
+    <string name="confirm_booking">Xac nhan dat ve</string>
+    <string name="logout">Dang xuat</string>
+</resources>
